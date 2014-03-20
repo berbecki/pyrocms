@@ -18,6 +18,7 @@ class Asset_Exception extends Exception {}
 include(dirname(__FILE__).'/Asset/jsmin.php');
 include(dirname(__FILE__).'/Asset/csscompressor.php');
 include(dirname(__FILE__).'/Asset/cssurirewriter.php');
+include(dirname(__FILE__).'/Lessc.php');
 
 class Asset
 {
@@ -46,6 +47,7 @@ class Asset
 		'css' => 'css/',
 		'js' => 'js/',
 		'img' => 'img/',
+		'less' => 'css/',
 	);
 
 	/**
@@ -60,6 +62,7 @@ class Asset
 	protected static $groups = array(
 		'css' => array(),
 		'js' => array(),
+		'less' => array(),
 	);
 
 	/**
@@ -120,7 +123,7 @@ class Asset
 	 * @var array Keeps a record of which groups have been rendered.
 	 *            We then check this when deciding whether to render a dep.
 	 */
-	protected static $rendered_groups = array('js' => array(), 'css' => array());
+	protected static $rendered_groups = array('js' => array(), 'css' => array(), 'less' => array());
 
 	/**
 	 * @var array Symlink-ed directories and their targets. Since the paths to assets and
@@ -142,6 +145,13 @@ class Asset
      * @var array
      */
     protected static $loadedCss = array();
+    
+    /**
+     * Loaded LESS
+     *
+     * @var array
+     */
+    protected static $loadedLess = array();
 
 	/**
 	 * Loads in the config and sets the variables
@@ -166,6 +176,7 @@ class Asset
 			'css' => $ci->config->item('asset_css_dir'),
 			'js' => $ci->config->item('asset_js_dir'),
 			'img' => $ci->config->item('asset_img_dir'),
+			'less' => $ci->config->item('asset_less_dir'),
 		);
 
 		is_null($ci->config->item('asset_cache_path')) or self::$cache_path = $ci->config->item('asset_cache_path');
@@ -192,6 +203,10 @@ class Asset
 		if (!self::group_exists('css', 'global')) {
 			self::add_group_base('css', 'global');
 		}
+        
+        if (!self::group_exists('less', 'global')) {
+            self::add_group_base('less', 'global');
+        }
 
 		is_null($ci->config->item('asset_show_files')) or self::$show_files = $ci->config->item('asset_show_files');
 		is_null($ci->config->item('asset_show_files_inline')) or self::$show_files_inline = $ci->config->item('asset_show_files_inline');
@@ -257,6 +272,7 @@ class Asset
 			'js' => array_key_exists('js_dir', $path_attr) ? $path_attr['js_dir'] : self::$default_folders['js'],
 			'css' => array_key_exists('css_dir', $path_attr) ? $path_attr['css_dir'] : self::$default_folders['css'],
 			'img' => array_key_exists('img_dir', $path_attr) ? $path_attr['img_dir'] : self::$default_folders['img'],
+			'less' => array_key_exists('less_dir', $path_attr) ? $path_attr['less_dir'] : self::$default_folders['css'],
 		);
 
 		self::$asset_paths[$path_key] = $path_val;
@@ -415,6 +431,7 @@ class Asset
 	{
 		self::asset_enabled('js', $groups, true);
 		self::asset_enabled('css', $groups, true);
+        self::asset_enabled('less', $groups, true);
 	}
 
 
@@ -427,6 +444,7 @@ class Asset
 	{
 		self::asset_enabled('js', $groups, false);
 		self::asset_enabled('css', $groups, false);
+        self::asset_enabled('less', $groups, false);
 	}
 
 
@@ -471,6 +489,26 @@ class Asset
 	{
 		self::asset_enabled('css', $groups, false);
 	}
+    
+    /**
+     * Enable a group of less assets.
+     *
+     * @param string|array $groups The group to enable, or array of groups
+     */
+    public static function enable_less($groups)
+    {
+        self::asset_enabled('less', $groups, true);
+    }
+
+    /**
+     * Disable a group of less assets.
+     *
+     * @param string|array $groups The group to disable, or array of groups
+     */
+    public static function disable_less($groups)
+    {
+        self::asset_enabled('less', $groups, false);
+    }
 
 
 	/**
@@ -564,6 +602,19 @@ class Asset
 	{
 		self::set_group_option('css', $group_names, $option_key, $option_value);
 	}
+    
+    /**
+     * Set group options on-the-fly, less version
+     *
+     * @param mixed $group_names Group name to change, or array of groups to change,
+     *   or '' for global group, or '*' for all groups.
+     * @param string $option_key The name of the option to change
+     * @param mixed $option_value What to set the option to
+     */
+    public static function set_less_option($group_names, $option_key, $option_value)
+    {
+        self::set_group_option('less', $group_names, $option_key, $option_value);
+    }
 
 	/**
 	 * Add a javascript asset.
@@ -619,6 +670,33 @@ class Asset
             self::$loadedCss[] = $sheet;
         }
 	}
+    
+    /**
+     * Add a less asset.
+     *
+     * @param string|array $sheet The script to add
+     * @param bool $sheet_min If given, will be used when $min = true
+     *   If omitted, $script will be minified internally.
+     * @param string $group The group to add this asset to. Defaults to 'global'
+     * @return mixed
+     */
+    public static function less($sheet, $sheet_min = false, $group = 'global')
+    {
+        if (is_array($sheet)) {
+            foreach ($sheet as $each) {
+                if (!in_array($each, self::$loadedCss)) {
+                    self::add_asset('less', $each, $sheet_min, $group);
+                    self::$loadedCss[] = $each;
+                }
+            }
+            return;
+        }
+
+        if (!in_array($sheet, self::$loadedCss)) {
+            self::add_asset('less', $sheet, $sheet_min, $group);
+            self::$loadedCss[] = $sheet;
+        }
+    }
 
 	/**
 	 * Abstraction of js() and css().
@@ -730,6 +808,23 @@ class Asset
 	{
 		return self::get_filepath($filename, 'css', $add_url, $force_array);
 	}
+    
+    /**
+     * Return the path for the given CSS asset. Ties into find_files, so supports
+     * everything that, say, Asset::js() does.
+     * Throws an exception if the file isn't found.
+     *
+     * @param string $filename the name of the asset to find.
+     * @param bool $add_url whether to add the 'url' config key to the filename.
+     * @param bool $force_array By default, when one file is found a string is
+     *      returned. Setting this to true causes a single-element array to be returned.
+     *
+     * @return string
+     */
+    public static function get_filepath_less($filename, $add_url = false, $force_array = false)
+    {
+        return self::get_filepath($filename, 'less', $add_url, $force_array);
+    }
 
 	/**
 	 * Return the path for the given img asset. Ties into find_files, so supports
@@ -831,6 +926,16 @@ class Asset
 	{
 		self::add_deps('css', $group, $deps);
 	}
+    
+    /**
+     * Sugar for add_deps(), for less groups
+     * @param string $group The group name to add deps to
+     * @param array $deps An array of group names to add as deps.
+     */
+    public static function add_less_deps($group, $deps)
+    {
+        self::add_deps('less', $group, $deps);
+    }
 
 	/**
 	 * Sticks the given filename through the filepath callback, if given.
@@ -867,6 +972,7 @@ class Asset
 	{
 		$r = self::render_css($group, $inline_dep, $attr);
 		$r .= self::render_js($group, $inline_dep, $attr);
+        $r .= self::render_less($group, $inline_dep, $attr);
 		return $r;
 	}
 
@@ -1034,6 +1140,61 @@ class Asset
 		}
 		return $ret;
 	}
+
+    /**
+     * Renders the specific less group, or all groups if no group specified.
+     *
+     * @param bool|string $group Which group to render. If omitted renders all groups.
+     * @param null $inline_dep @deprecated If true, the result is printed inline.
+     *   If false, is written to a file and linked to. In fact, $inline = true also
+     *   causes a cache file to be written for speed purposes.
+     * @param array $attr_dep
+     *
+     * @return string The css tags to be written to the page.
+     */
+    public static function render_less($group = false, $inline_dep = null, $attr_dep = array())
+    {
+            
+        // Don't force the user to remember that false is used for ommitted non-bool arguments
+        if (!is_string($group))
+        {
+            $group = false;
+        }
+
+        if (!is_array($attr_dep))
+        {
+            $attr_dep = array();
+        }
+
+        
+        $file_groups = self::files_to_render('less', $group);
+
+        $ret = '';
+
+        foreach ($file_groups as $group_name => $file_group)
+        {
+            // We used to take $inline as 2nd argument. However, we now use a group option.
+            // It's easiest if we let $inline override this group option, though.
+            $inline = ($inline_dep === null) ? self::$groups['less'][$group_name]['inline'] : $inline_dep;
+
+            // $attr is also deprecated. If specified, entirely overrides the group option.
+            $attr = (!count($attr_dep)) ? self::$groups['less'][$group_name]['attr'] : $attr_dep;
+
+            $files = array();
+            
+            foreach ($file_group as $file)
+                {
+                        $remote = (strpos($file['file'], '//') !== false);
+                        $base = ($remote) ? '' : self::$asset_url;
+                        $filepath = self::process_filepath($file['file'], 'less', $remote);
+                        $files[$filepath] = '/'.self::$asset_paths['theme']['path'].self::$asset_paths['theme']['dirs']['less'];
+                }
+            Less_Cache::$cache_dir = 'assets/cache/';
+            $css_file_name = Less_Cache::Get( $files );
+            $ret .= '<link rel="stylesheet" href="assets/cache/'.$css_file_name.'" />';
+        }
+        return $ret;
+    }
 
 	/**
 	 * Figures out where a file should be, based on its namespace and type.

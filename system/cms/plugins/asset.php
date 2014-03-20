@@ -298,6 +298,25 @@ class Plugin_Asset extends Plugin
 
 		return Asset::css($file, $file_min, $group);
 	}
+    
+    /**
+     * Asset LESS
+     *
+     * Insert a LESS tag
+     *
+     * Usage:
+     *
+     * {{ asset:less file="" group="" }}
+     *
+     * @return string Full url compiled css to asset from less
+     */
+    public function less()
+    {
+        $file     = $this->attribute('file');
+        $group    = $this->attribute('group');
+
+        return Asset::less($file, null, $group);
+    }
 
 	/**
 	 * Asset Inline CSS
